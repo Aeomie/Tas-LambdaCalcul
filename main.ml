@@ -66,6 +66,31 @@ and rename_var (t:term) (old_v:string) (new_v:string) : term =
       if x = old_v then Abs (x, t_body) 
       else Abs (x, rename_var t_body old_v new_v)
 
+
+let substitute_var (t:term) (v:string) (t0:term) : term =
+  match t with
+    Var x -> if x = v then t0 else Var x
+    | N n -> N n
+    | Add (t1, t2) -> Add (substitute_var t1 v t0, substitute_var t2 v t0)
+    | App (t1, t2) -> App (substitute_var t1 v t0, substitute_var t2 v t0)
+    | Abs (x, t_body) -> 
+        if x = v then Abs(x, t_body) (* wont change bound values*)
+        else if List.mem x (free_vars t0) then (* checks if there is actually a variable conflict , if not we can just substitue directly*)
+          let new_x : string = new_var () in
+          let new_body : term = rename_var t_body x new_x in
+          Abs (new_x, substitute_var new_body v t0)
+        else 
+          Abs (x, substitute_var t_body v t0)
+
+and free_vars (t:term) : string list =
+  match t with
+    Var x -> [x]
+  | N n -> []
+  | Add (t1, t2) -> (free_vars t1) @ (free_vars t2)
+  | App (t1, t2) -> (free_vars t1) @ (free_vars t2)
+  | Abs (x, t_body) -> List.filter (fun y -> y <> x) (free_vars t_body) (* gets vars from t_body and removes the bound var x *)
+
+
 exception VarPasTrouve
 
 
