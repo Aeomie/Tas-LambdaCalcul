@@ -74,36 +74,40 @@ let barendregt_checker(t:term) : term =
         Abs (x, aux t_body (x::vars))
   in aux t []
 
-let rec left_right_eval (t:term) : term =
+let rec can_reduce(t:term) : bool =
   match t with
-  | Var x -> Var x
-  | N n -> N n
-  | Abs (x, t_body) -> Abs (x, t_body)
-  | Add (t1, t2) ->
-      let t1' = left_right_eval t1 in
-      let t2' = left_right_eval t2 in
-      (match (t1', t2') with
-      | N n1, N n2 -> N (n1 + n2)
-      | _ -> Add (t1', t2'))
-  | App (t1, t2) ->
-      let t1' = left_right_eval t1 in
-      let t2' = left_right_eval t2 in
-      (match t1' with
-      | Abs (x, t_body) ->
-          let t_body' = substitute_var t_body x t2' in
-          left_right_eval t_body'
-      | _ -> App (t1', t2'))
+  | Add(N _, N _) -> true
+  | Add(t1, t2) -> can_reduce t1 || can_reduce t2
+  | App(Abs(_, _), (N _ | Abs _)) -> true
+  | App(t1, t2) -> can_reduce t1 || can_reduce t2
+  | Abs(_,_) -> false
+  | Var _ -> false
+  | N _ -> false
+
+let rec reduce_one_step(t:term) : term =
+  match t with
+  (* Direct redexes - reduce them *)
+  | Add(N n1, N n2) -> N (n1 + n2)
+  | App(Abs(x, t_body), (N _ | Abs _ as v)) -> substitute_var t_body x v
+  
+  (* Compound terms - find leftmost redex *)
+  | Add(t1, t2) -> 
+      if can_reduce t1 then 
+        Add(reduce_one_step t1, t2)  (* Still recursively finds leftmost in t1 *)
+      else 
+        Add(t1, reduce_one_step t2)
+  
+  | App(t1, t2) -> 
+      if can_reduce t1 then 
+        App(reduce_one_step t1, t2)
+      else 
+        App(t1, reduce_one_step t2)
+  
+  (* Already in normal form *)
+  | _ -> t
 
 let left_right_eval_onestep (t:term) : term =
-  match t with
-  | Var x -> Var x
-  | N n -> N n
-  | Abs (x, t_body) -> Abs (x, t_body)
-  | Add (N n1, N n2) -> N (n1 + n2)
-  | Add (t1, t2) -> Add (t1, t2)
-  | App (Abs (x, t_body), (N _ | Abs _ as v)) -> 
-      substitute_var t_body x v
-  | App (t1, t2) -> App (t1, t2)
+  if can_reduce t then reduce_one_step t else t
 
 exception VarPasTrouve
 
