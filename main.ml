@@ -116,11 +116,18 @@ let rec search_type (v:string) (e:env) : typ =
     [] -> raise VarPasTrouve
   | (v1, t1)::q -> if v1 = v then t1 else search_type v q
 
+let rec search_variable_by_type (t:typ) (e:env) : string =
+  match e with
+    [] -> raise VarPasTrouve
+  | (v1, t1)::q -> if t1 = t then v1 else search_variable_by_type t q
+
+
 let rec belongs_type (v:string) (t:typ) : bool = 
   match t with
     Var v1 -> v1 = v
   | Arr (t1, t2) -> (belongs_type v t1) || (belongs_type v t2)
   | Nat -> false
+
 
 let rec substitue_type(t:typ) (v:string) (new_typ:typ) : typ =
   match t with
@@ -182,27 +189,35 @@ let rec find_goal (e: equa_zip) (goal:string) : typ =
   | (_, (t, Var v)::q) when v = goal -> t
   | (e1, c::e2) -> find_goal (e1, e2) goal
 
+  (*
+  How zip works ( List of already processed equations , List of equations to process )
+  *)
 let rec unification (e : equa_zip) (but : string) : typ = 
   match e with 
-  | (_, []) -> 
+  | (_, []) ->  (* reached the end *)
       (try find_goal (rewind e) but 
        with VarPasTrouve -> raise (Unif_fail "but pas trouvé"))
   | (e1, (t_left, t_right)::e2) -> 
       match (t_left, t_right) with
-      | Var v1, _ when v1 = but -> unification ((t_left, t_right)::e1, e2) but
-      | Var v1, Var v2 -> unification (substitue_type_zip (rewind (e1,e2)) v2 (Var v1)) but
-      | Var v1, t2 -> 
-          if belongs_type v1 t2 
-          then raise (Unif_fail ("occurence de "^ v1 ^" dans "^(print_type t2))) 
-          else unification (substitue_type_zip (rewind (e1,e2)) v1 t2) but
+      (* same type *)
+      | Nat , Nat -> unification (e1, e2) but
+      | Var v1 , _ when v1 = but -> unification ((t_left, t_right)::e1, e2) but
+      | Var v1, Var v2 ->
+         unification (substitue_type_zip (rewind (e1,e2)) v2 (Var v1)) but
+      (* if one of the two types are Var *)
+      | Var v1 , t2 ->
+        if belongs_type v1 t2 
+        then raise (Unif_fail ("occurence de "^ v1 ^" dans "^(print_type t2)))
+        else unification (substitue_type_zip (rewind (e1,e2)) v1 t2) but
       | t1, Var v2 ->
           if belongs_type v2 t1 
           then raise (Unif_fail ("occurence de "^ v2 ^" dans " ^(print_type t1))) 
           else unification (substitue_type_zip (rewind (e1,e2)) v2 t1) but
+      (* if they are arrow type *)
       | Arr (t1,t2), Arr (t3,t4) -> unification (e1, (t1, t3)::(t2, t4)::e2) but
+      (* fail calls*)
       | Arr (_, _), _ -> raise (Unif_fail ("type fleche non-unifiable avec "^(print_type t_right)))
       | _, Arr (_, _) -> raise (Unif_fail ("type fleche non-unifiable avec "^(print_type t_left)))
-      | Nat, Nat -> unification (e1, e2) but
       | Nat, t3 -> raise (Unif_fail ("type entier non-unifiable avec "^(print_type t3)))
       | t3, Nat -> raise (Unif_fail ("type entier non-unifiable avec "^(print_type t3)))
 
@@ -238,6 +253,9 @@ let ex_higher_order : term =
     Abs ("x", Add (Var "x", N 10))
   )
 let () = print_endline "=== Example 3: (fun f -> f 2 + f 3) (fun x -> x + 10) ==="; print_reductions ex_higher_order 10; print_endline ""
+
+let test_Var_Type = Var "x"
+let () = print_type test_Var_Type |> print_endline
 
 let main () = ()
 
