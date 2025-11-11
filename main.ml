@@ -1,16 +1,4 @@
-(*Terms*)
-type term = 
-  Var of string (* Variable *)
-  | N of int (* Nombre *)
-  | Add of term * term (* Addition *)
-  | App of term * term (* Application *)
-  | Abs of string * term (* Abstraction *)
-
-(*Types*)
-type typ = 
-  Var of string (* Variable de type *)
-  | Arr of typ * typ (* flèche *)
-  | Nat (* Type des naturels *)
+open Ast
 
 (*Environnements de typage*)
 type env = (string * typ) list
@@ -239,24 +227,28 @@ let rec print_reductions t steps =
       print_reductions t' (steps - 1)
     end
  
+let () =
+  if Array.length Sys.argv < 3 then (
+    Printf.eprintf "Usage: %s <filename> <num_steps>\n" Sys.argv.(0);
+    exit 1
+  );
 
-(* ***EXEMPLES*** *)
-let ex_add : term = Add (N 3, N 5)
-let () = print_endline "=== Example 1: 3 + 5 ==="; print_reductions ex_add 5; print_endline ""
+  let fname = Sys.argv.(1) in
+  let num_steps =
+    try int_of_string Sys.argv.(2)
+    with Failure _ ->
+      Printf.eprintf "Second argument must be an integer\n";
+      exit 1
+  in
 
-let ex_lambda_add : term = App (Abs ("x", Add (Var "x", N 1)), N 7)
-let () = print_endline "=== Example 2: (fun x -> x + 1) 7 ==="; print_reductions ex_lambda_add 5; print_endline ""
-
-let ex_higher_order : term =
-  App (
-    Abs ("f", Add (App (Var "f", N 2), App (Var "f", N 3))),
-    Abs ("x", Add (Var "x", N 10))
-  )
-let () = print_endline "=== Example 3: (fun f -> f 2 + f 3) (fun x -> x + 10) ==="; print_reductions ex_higher_order 10; print_endline ""
-
-let test_Var_Type = Var "x"
-let () = print_type test_Var_Type |> print_endline
-
-let main () = ()
-
-let _ = main ()
+  let ic = open_in fname in
+  let lexbuf = Lexing.from_channel ic in
+  try
+    let prog_term = Parser.prog Lexer.token lexbuf in
+    print_reductions prog_term num_steps;
+    close_in ic
+  with
+  | Lexer.Eof | Parsing.Parse_error ->
+      Printf.eprintf "Error parsing file %s\n" fname;
+      close_in ic;
+      exit 1
