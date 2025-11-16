@@ -161,6 +161,7 @@ let rec print_type (t : typ) : string =
     Var x -> x
   | Arr (t1, t2) -> "(" ^ (print_type t1) ^ " -> " ^ (print_type t2) ^ ")"
   | Nat -> "Nat"
+  | List t1 -> "List(" ^ (print_type t1) ^ ")"
 
 let rec print_term (t : term) : string = 
   match t with
@@ -169,7 +170,15 @@ let rec print_term (t : term) : string =
   | Add (t1, t2) -> "(" ^ (print_term t1) ^ " + " ^ (print_term t2) ^ ")"
   | App (t1, t2) -> "(" ^ (print_term t1) ^ " " ^ (print_term t2) ^ ")"
   | Abs (x, t) -> "(fun " ^ x ^ " -> " ^ (print_term t) ^ ")"
-
+  | Nil -> "[]"
+  | Cons (hd, tl) -> "(" ^ (print_term hd) ^ " :: " ^ (print_term tl) ^ ")"
+  | Hd t1 -> "hd(" ^ (print_term t1) ^ ")"
+  | Tl t1 -> "tl(" ^ (print_term t1) ^ ")"
+  | IfZero (t1, t2, t3) -> "ifzero "^ (print_term t1) ^ " then " ^ (print_term t2) ^ " else " ^ (print_term t3)
+  | IfEmpty (t1, t2, t3) -> "ifempty "^ (print_term t1) ^ " then " ^ (print_term t2) ^ " else " ^ (print_term t3)
+  | Let (x, t1, t2) -> "let " ^ x ^ " = " ^ (print_term t1) ^ " in " ^ (print_term t2)
+  | Fix (x, t1) -> "fix (" ^ x ^ " -> " ^ (print_term t1) ^ ")" 
+  
 let rec find_goal (e: equa_zip) (goal:string) : typ =
   match e with
     (_, []) -> raise VarPasTrouve
