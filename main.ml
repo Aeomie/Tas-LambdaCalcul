@@ -192,7 +192,8 @@ let rec print_type (t : typ) : string =
     Var x -> x
   | Arr (t1, t2) -> "(" ^ (print_type t1) ^ " -> " ^ (print_type t2) ^ ")"
   | Nat -> "Nat"
-  | List t1 -> "List(" ^ (print_type t1) ^ ")"
+  | List t1 -> "List[" ^ (print_type t1) ^ "]"
+  | Forall (v, t1) -> "∀" ^ v ^ ". " ^ (print_type t1)
 
 let rec print_term (t : term) : string = 
   match t with

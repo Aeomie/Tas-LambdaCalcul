@@ -21,3 +21,4 @@ type typ =
   | Nat
   | Arr of typ * typ
   | List of typ
+  | Forall of string * typ
