@@ -66,16 +66,25 @@ let rec can_reduce(t:term) : bool =
   match t with
   | Add(N _, N _) -> true
   | Add(t1, t2) -> can_reduce t1 || can_reduce t2
+  | Sub(N _, N _) -> true
+  | Sub(t1, t2) -> can_reduce t1 || can_reduce t2
   | App(Abs(_, _), (N _ | Abs _)) -> true
   | App(t1, t2) -> can_reduce t1 || can_reduce t2
-  | Abs(_,_) -> false
-  | Var _ -> false
-  | N _ -> false
+  | Let(_, _, _) -> true (* Always true Because Aslong as it still didnt disappear then its still reduceable*)
+  | Fix(_, _) -> true
+  | IfZero(N 0, _, _) -> true     (* can pick then branch *)
+  | IfZero(N _, _, _) -> true     (* can pick else branch *)
+  | IfZero(cond, _, _) -> can_reduce cond  (* incase in the condition is a var *)
+  | IfEmpty(Nil, _, _) -> true
+  | IfEmpty(Cons(_, _), _, _) -> true
+  | IfEmpty(cond, _, _) -> can_reduce cond (* incase in the condition is a var *)
+  | Abs(_,_) | Var _ | N _ | Nil -> false
 
 let rec reduce_one_step(t:term) : term =
   match t with
   (* Direct redexes - reduce them *)
   | Add(N n1, N n2) -> N (n1 + n2)
+  | Sub(N n1, N n2) -> N (n1 - n2)
   | App(Abs(x, t_body), (N _ | Abs _ as v)) -> substitute_var t_body x v
   
   (* Compound terms - find leftmost redex *)
@@ -84,13 +93,35 @@ let rec reduce_one_step(t:term) : term =
         Add(reduce_one_step t1, t2)  (* Still recursively finds leftmost in t1 *)
       else 
         Add(t1, reduce_one_step t2)
-  
+  | Sub(t1, t2) -> 
+    if can_reduce t1 then 
+      Sub(reduce_one_step t1, t2)
+    else 
+      Sub(t1, reduce_one_step t2)
   | App(t1, t2) -> 
       if can_reduce t1 then 
         App(reduce_one_step t1, t2)
       else 
         App(t1, reduce_one_step t2)
-  
+  | Let(x, t1, t2) ->
+      if can_reduce t1 then
+        Let(x, reduce_one_step t1, t2)
+      else
+        substitute_var t2 x t1
+  | Fix(x, t1) ->
+      substitute_var t1 x (Fix(x, t1))
+  | IfZero(N 0, then_e, else_e) ->
+      then_e
+  | IfZero(N n, then_e, else_e) -> 
+      else_e
+  | IfZero(cond,then_e,else_e)->
+      IfZero(reduce_one_step cond, then_e, else_e)
+  | IfEmpty(Nil, then_e, else_e) ->
+      then_e
+  | IfEmpty(Cons(hd, tl), then_e, else_e) ->
+      else_e
+  | IfEmpty(cond, then_e, else_e) ->
+      IfEmpty(reduce_one_step cond, then_e, else_e)
   (* Already in normal form *)
   | _ -> t
 
@@ -168,6 +199,7 @@ let rec print_term (t : term) : string =
     Var x -> x
   | N n -> string_of_int n
   | Add (t1, t2) -> "(" ^ (print_term t1) ^ " + " ^ (print_term t2) ^ ")"
+  | Sub (t1, t2) -> "(" ^ (print_term t1) ^ " - " ^ (print_term t2) ^ ")"
   | App (t1, t2) -> "(" ^ (print_term t1) ^ " " ^ (print_term t2) ^ ")"
   | Abs (x, t) -> "(fun " ^ x ^ " -> " ^ (print_term t) ^ ")"
   | Nil -> "[]"

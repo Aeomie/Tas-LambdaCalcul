@@ -1,0 +1,1 @@
+ifzero (3 - 3) then 99 else 88
