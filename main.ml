@@ -161,7 +161,14 @@ let rec generate_equations (te:term) (t:typ) (e:env) : equations =
   match te with
     Var x -> let tv : typ = search_type x e in [(t,tv)]
   | N _ -> [(t, Nat)]
-  | Add (t1, t2) 
+  | Add (t1, t2) ->
+    let eq1 : equa = generate_equations t1 Nat e in
+    let eq2 : equa = generate_equations t2 Nat e in
+    (t, Nat) :: (eq1 @ eq2)
+  | Sub (t1, t2) ->
+    let eq1 : equa = generate_equations t1 Nat e in
+    let eq2 : equa = generate_equations t2 Nat e in
+    (t, Nat) :: (eq1 @ eq2)
   | App (t1, t2) ->
       let nv : string = new_var () in
       let eq1 = generate_equations t1 (Arr (Var nv, t)) e in
@@ -172,6 +179,32 @@ let rec generate_equations (te:term) (t:typ) (e:env) : equations =
       and nv2 : string = new_var () in
       (t, Arr (Var nv1, Var nv2)) ::
       (generate_equations t_body (Var nv2) ((x, Var nv1)::e))
+  | Hd t1 ->
+      let nv : string = new_var () in
+      let eq1 = generate_equations t1 (List (Var nv)) e in
+      (t, Var nv) :: eq1
+  | Tl t1 ->
+      let nv : string = new_var () in
+      let eq1 = generate_equations t1 (List (Var nv)) e in
+      (t, List (Var nv)) :: eq1
+
+| IfZero (cond, then_e, else_e) ->
+    let eq1 = generate_equations cond Nat e in 
+    let eq2 = generate_equations then_e t e in
+    let eq3 = generate_equations else_e t e in
+    eq1 @ eq2 @ eq3
+
+| IfEmpty(cond, then_e, else_e) ->
+    let nv_elem : string = new_var () in
+    let eq1 = generate_equations cond (List (Var nv_elem)) e in 
+    let eq2 = generate_equations then_e t e in
+    let eq3 = generate_equations else_e t e in
+    eq1 @ eq2 @ eq3
+
+  | Let(x, term1, term2) ->
+
+      
+
 
 exception Unif_fail of string
 
