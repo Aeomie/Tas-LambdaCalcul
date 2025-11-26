@@ -146,6 +146,8 @@ let rec belongs_type (v:string) (t:typ) : bool =
     Var v1 -> v1 = v
   | Arr (t1, t2) -> (belongs_type v t1) || (belongs_type v t2)
   | Nat -> false
+  | List t1 -> belongs_type v t1
+  | Forall (x, t1) -> if x = v then false else belongs_type v t1
 
 
 let rec substitue_type(t:typ) (v:string) (new_typ:typ) : typ =
@@ -153,6 +155,33 @@ let rec substitue_type(t:typ) (v:string) (new_typ:typ) : typ =
     Var v1 -> if v1 = v then new_typ else Var v1
   | Arr (t1, t2) -> Arr (substitue_type t1 v new_typ, substitue_type t2 v new_typ)
   | Nat -> Nat
+  | List t1 -> List (substitue_type t1 v new_typ)
+  | Forall (x, t1) ->
+      if x = v then Forall (x, t1) (* Linked , Dont subtitute*)
+      else Forall (x, substitue_type t1 v new_typ)
+
+
+let rec get_free_vars_type (t:typ) : string list =
+  match t with
+  Var x -> [x]
+  | Nat -> []
+  | Arr (t1, t2) -> (get_free_vars_type t1) @ (get_free_vars_type t2)
+  | List t1 -> get_free_vars_type t1
+  | Forall (x, t1) -> List.filter (fun y -> y <> x) (get_free_vars_type t1)
+
+
+let rec get_vars_types_env (e:env) : string list = 
+  match e with
+  [] -> []
+  | (_, t):: rest -> (get_free_vars_type t) @ (get_vars_types_env rest)
+
+let generalise (t:typ) (e:env) : typ =
+  let type_vars = get_free_vars_type t in
+  let env_vars = get_vars_types_env e in
+  let vars_to_generalise = List.filter (fun x -> not (List.mem x env_vars)) type_vars in
+  (*removes dupes if there are any *)
+  let unique_vars = List.sort_uniq String.compare vars_to_generalise in
+  List.fold_right (fun v acc -> Forall (v, acc)) unique_vars t
 
 let substitue_type_everywhere (e:equations) (v:string) (new_type: typ) : equations = 
   List.map (fun (x, y) -> (substitue_type x v new_type , substitue_type y v new_type)) e
@@ -179,6 +208,15 @@ let rec generate_equations (te:term) (t:typ) (e:env) : equations =
       and nv2 : string = new_var () in
       (t, Arr (Var nv1, Var nv2)) ::
       (generate_equations t_body (Var nv2) ((x, Var nv1)::e))
+
+  | Nil ->
+      let nv : string = new_var () in
+      [(t, List (Var nv))]
+  | Cons (hd, tl) ->
+      let nv : string = new_var () in
+      let eq1 = generate_equations hd (Var nv) e in
+      let eq2 = generate_equations tl (List (Var nv)) e in
+      (t, List (Var nv)) :: (eq1 @ eq2)
   | Hd t1 ->
       let nv : string = new_var () in
       let eq1 = generate_equations t1 (List (Var nv)) e in
@@ -188,20 +226,33 @@ let rec generate_equations (te:term) (t:typ) (e:env) : equations =
       let eq1 = generate_equations t1 (List (Var nv)) e in
       (t, List (Var nv)) :: eq1
 
-| IfZero (cond, then_e, else_e) ->
-    let eq1 = generate_equations cond Nat e in 
-    let eq2 = generate_equations then_e t e in
-    let eq3 = generate_equations else_e t e in
-    eq1 @ eq2 @ eq3
+  | IfZero (cond, then_e, else_e) ->
+      let eq1 = generate_equations cond Nat e in 
+      let eq2 = generate_equations then_e t e in
+      let eq3 = generate_equations else_e t e in
+      eq1 @ eq2 @ eq3
 
-| IfEmpty(cond, then_e, else_e) ->
-    let nv_elem : string = new_var () in
-    let eq1 = generate_equations cond (List (Var nv_elem)) e in 
-    let eq2 = generate_equations then_e t e in
-    let eq3 = generate_equations else_e t e in
-    eq1 @ eq2 @ eq3
+  | IfEmpty(cond, then_e, else_e) ->
+      let nv_elem : string = new_var () in
+      let eq1 = generate_equations cond (List (Var nv_elem)) e in 
+      let eq2 = generate_equations then_e t e in
+      let eq3 = generate_equations else_e t e in
+      eq1 @ eq2 @ eq3
 
+  | Fix (phi, m) -> (* keep same names as the example*)
+      let nv : string = new_var () in
+      let eq1 = generate_equations m (Var nv) ()
   | Let(x, term1, term2) ->
+    (* On doit typer term1 pour obtenir son type généralisé *)
+    let nv1 = new_var () in
+    let eq1 = ([], generate_equations term1 (Var nv1) e) in (* zip def *)
+      (try
+      let t1 = unification eq1 nv1 in
+      let generalized_t1 = generalize t1 e in
+      let eq2 = generate_equations term2 t ((x, generalized_t1)::e) in
+      eq2
+      with Unif_fail msg -> 
+        raise (Unif_fail ("Erreur de typage dans let: " ^ msg)))
 
       
 
@@ -267,6 +318,18 @@ let rec unification (e : equa_zip) (but : string) : typ =
       | Var v1 , _ when v1 = but -> unification ((t_left, t_right)::e1, e2) but
       | Var v1, Var v2 ->
          unification (substitue_type_zip (rewind (e1,e2)) v2 (Var v1)) but
+      (* For all*)
+      | Forall (x,t1) , t2 ->
+          let fresh = new_var () in
+          let t1_opened = substitue_type t1 x (Var fresh) in
+          unification ( (t1_opened, t2)::e2) but
+      | t1 , Forall (x,t2) ->
+          let fresh = new_var () in
+          let t2_opened = substitue_type t2 x (Var fresh) in
+          unification ( (t1, t2_opened)::e1 , e2)
+      (* List*)
+      | List t1 , List t2 -> unification (e1, (t1, t2)::e2) but
+      
       (* if one of the two types are Var *)
       | Var v1 , t2 ->
         if belongs_type v1 t2 
@@ -281,6 +344,8 @@ let rec unification (e : equa_zip) (but : string) : typ =
       (* fail calls*)
       | Arr (_, _), _ -> raise (Unif_fail ("type fleche non-unifiable avec "^(print_type t_right)))
       | _, Arr (_, _) -> raise (Unif_fail ("type fleche non-unifiable avec "^(print_type t_left)))
+      | List _ , _ -> raise (Unif_fail ("type liste non-unifiable avec "^(print_type t_right)))
+      | _ , List _ -> raise (Unif_fail ("type liste non-unifiable avec "^(print_type t_left)))
       | Nat, t3 -> raise (Unif_fail ("type entier non-unifiable avec "^(print_type t3)))
       | t3, Nat -> raise (Unif_fail ("type entier non-unifiable avec "^(print_type t3)))
 
