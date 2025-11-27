@@ -161,6 +161,7 @@ let rec substitue_type(t:typ) (v:string) (new_typ:typ) : typ =
       else Forall (x, substitue_type t1 v new_typ)
 
 
+  (* gets the free vars from that type*)
 let rec get_free_vars_type (t:typ) : string list =
   match t with
   Var x -> [x]
@@ -170,6 +171,7 @@ let rec get_free_vars_type (t:typ) : string list =
   | Forall (x, t1) -> List.filter (fun y -> y <> x) (get_free_vars_type t1)
 
 
+  (* gets all the vars from the types in the env *)
 let rec get_vars_types_env (e:env) : string list = 
   match e with
   [] -> []
@@ -239,9 +241,11 @@ let rec generate_equations (te:term) (t:typ) (e:env) : equations =
       let eq3 = generate_equations else_e t e in
       eq1 @ eq2 @ eq3
 
-  | Fix (phi, m) -> (* keep same names as the example*)
+  | Fix (phi, m) ->
       let nv : string = new_var () in
-      let eq1 = generate_equations m (Var nv) ()
+      let eq1 = generate_equations m (Var nv) ((phi, Var nv)::e) in
+      (t, Var nv) :: eq1
+
   | Let(x, term1, term2) ->
     (* On doit typer term1 pour obtenir son type généralisé *)
     let nv1 = new_var () in
@@ -319,14 +323,15 @@ let rec unification (e : equa_zip) (but : string) : typ =
       | Var v1, Var v2 ->
          unification (substitue_type_zip (rewind (e1,e2)) v2 (Var v1)) but
       (* For all*)
-      | Forall (x,t1) , t2 ->
+      | Forall(x, t1), t2 ->
           let fresh = new_var () in
           let t1_opened = substitue_type t1 x (Var fresh) in
-          unification ( (t1_opened, t2)::e2) but
-      | t1 , Forall (x,t2) ->
+          unification (e1, (t1_opened, t2)::e2) but
+      
+      | t1, Forall(x, t2) ->
           let fresh = new_var () in
           let t2_opened = substitue_type t2 x (Var fresh) in
-          unification ( (t1, t2_opened)::e1 , e2)
+          unification (e1, (t1, t2_opened)::e2) but
       (* List*)
       | List t1 , List t2 -> unification (e1, (t1, t2)::e2) but
       
