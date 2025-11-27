@@ -1,13 +1,16 @@
 #!/bin/bash
 
 # Ensure folder and option variables are passed
-if [ "$#" -ne 2 ]; then
-    echo "Usage: $0 <folder> <number_of_steps>"
+if [ "$#" -ne 3 ]; then
+    echo "Usage: $0 <folder> <mode> <number_of_steps>"
+    echo "  mode: 'type' or 'eval'"
+    echo "  number_of_steps: for eval mode (can be 0 for type mode)"
     exit 1
 fi
 
 folder=$1  # Folder path
-number_of_steps=$2  # Number of steps
+mode=$2    # Mode: 'type' or 'eval'
+number_of_steps=$3  # Number of steps
     
 
 # Process files based on option
@@ -22,7 +25,7 @@ for dir in "$folder"/*; do
             [ -e "$file" ] || continue  # Skip if no .aps files
             echo "filename : $file"
             echo "Result: "
-            ./main "$file" "$number_of_steps"
+            ./main "$file" "$mode" "$number_of_steps"
             echo "----------------------------------------------"
         done
         echo "*****>>> Done with folder: $dir*****"
@@ -35,7 +38,7 @@ for file in "$folder"/*.lambda; do
     [ -e "$file" ] || continue
     echo "filename : $file"
     echo "Result:"
-    ./main "$file" "$number_of_steps"
+    ./main "$file" "$mode" "$number_of_steps"
     echo "----------------------------------------------"
 done
 echo "******* END *******"

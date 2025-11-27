@@ -188,17 +188,67 @@ let generalise (t:typ) (e:env) : typ =
 let substitue_type_everywhere (e:equations) (v:string) (new_type: typ) : equations = 
   List.map (fun (x, y) -> (substitue_type x v new_type , substitue_type y v new_type)) e
 
+exception Unif_fail of string
+
+type equa_zip = equations * equations
+
+let rec rewind (e: equa_zip) =
+  match e with 
+    ([], _) -> e
+  | (c::e1, e2) -> rewind (e1, c::e2)
+
+let substitue_type_zip (e: equa_zip) (v:string) (new_type: typ) : equa_zip =
+  match e with
+    (eq1, eq2) -> (substitue_type_everywhere eq1 v new_type, substitue_type_everywhere eq2 v new_type)
+
+(* PRINTERS - needed before unification *)
+let rec print_type (t : typ) : string =
+  match t with
+    Var x -> x
+  | Arr (t1, t2) -> "(" ^ (print_type t1) ^ " -> " ^ (print_type t2) ^ ")"
+  | Nat -> "Nat"
+  | List t1 -> "List[" ^ (print_type t1) ^ "]"
+  | Forall (v, t1) -> "∀" ^ v ^ ". " ^ (print_type t1)
+
+let rec print_term (t : term) : string = 
+  match t with
+    Var x -> x
+  | N n -> string_of_int n
+  | Add (t1, t2) -> "(" ^ (print_term t1) ^ " + " ^ (print_term t2) ^ ")"
+  | Sub (t1, t2) -> "(" ^ (print_term t1) ^ " - " ^ (print_term t2) ^ ")"
+  | App (t1, t2) -> "(" ^ (print_term t1) ^ " " ^ (print_term t2) ^ ")"
+  | Abs (x, t) -> "(fun " ^ x ^ " -> " ^ (print_term t) ^ ")"
+  | Nil -> "[]"
+  | Cons (hd, tl) -> "(" ^ (print_term hd) ^ " :: " ^ (print_term tl) ^ ")"
+  | Hd t1 -> "hd(" ^ (print_term t1) ^ ")"
+  | Tl t1 -> "tl(" ^ (print_term t1) ^ ")"
+  | IfZero (t1, t2, t3) -> "ifzero "^ (print_term t1) ^ " then " ^ (print_term t2) ^ " else " ^ (print_term t3)
+  | IfEmpty (t1, t2, t3) -> "ifempty "^ (print_term t1) ^ " then " ^ (print_term t2) ^ " else " ^ (print_term t3)
+  | Let (x, t1, t2) -> "let " ^ x ^ " = " ^ (print_term t1) ^ " in " ^ (print_term t2)
+  | Fix (x, t1) -> "fix (" ^ x ^ " -> " ^ (print_term t1) ^ ")" 
+  
+let rec find_goal (e: equa_zip) (goal:string) : typ =
+  match e with
+    (_, []) -> raise VarPasTrouve
+  | (_, (Var v, t)::q) when v = goal -> t
+  | (_, (t, Var v)::q) when v = goal -> t
+  | (e1, c::e2) -> find_goal (e1, e2) goal
+
+  (*
+  How zip works ( List of already processed equations , List of equations to process )
+  *)
+
 let rec generate_equations (te:term) (t:typ) (e:env) : equations = 
   match te with
     Var x -> let tv : typ = search_type x e in [(t,tv)]
   | N _ -> [(t, Nat)]
   | Add (t1, t2) ->
-    let eq1 : equa = generate_equations t1 Nat e in
-    let eq2 : equa = generate_equations t2 Nat e in
+    let eq1 : equations = generate_equations t1 Nat e in
+    let eq2 : equations = generate_equations t2 Nat e in
     (t, Nat) :: (eq1 @ eq2)
   | Sub (t1, t2) ->
-    let eq1 : equa = generate_equations t1 Nat e in
-    let eq2 : equa = generate_equations t2 Nat e in
+    let eq1 : equations = generate_equations t1 Nat e in
+    let eq2 : equations = generate_equations t2 Nat e in
     (t, Nat) :: (eq1 @ eq2)
   | App (t1, t2) ->
       let nv : string = new_var () in
@@ -252,65 +302,12 @@ let rec generate_equations (te:term) (t:typ) (e:env) : equations =
     let eq1 = ([], generate_equations term1 (Var nv1) e) in (* zip def *)
       (try
       let t1 = unification eq1 nv1 in
-      let generalized_t1 = generalize t1 e in
+      let generalized_t1 = generalise t1 e in
       let eq2 = generate_equations term2 t ((x, generalized_t1)::e) in
       eq2
       with Unif_fail msg -> 
         raise (Unif_fail ("Erreur de typage dans let: " ^ msg)))
-
-      
-
-
-exception Unif_fail of string
-
-type equa_zip = equations * equations
-
-let rec rewind (e: equa_zip) =
-  match e with 
-    ([], _) -> e
-  | (c::e1, e2) -> rewind (e1, c::e2)
-
-let substitue_type_zip (e: equa_zip) (v:string) (new_type: typ) : equa_zip =
-  match e with
-    (eq1, eq2) -> (substitue_type_everywhere eq1 v new_type, substitue_type_everywhere eq2 v new_type)
-
-(* PRINTERS - needed before unification *)
-let rec print_type (t : typ) : string =
-  match t with
-    Var x -> x
-  | Arr (t1, t2) -> "(" ^ (print_type t1) ^ " -> " ^ (print_type t2) ^ ")"
-  | Nat -> "Nat"
-  | List t1 -> "List[" ^ (print_type t1) ^ "]"
-  | Forall (v, t1) -> "∀" ^ v ^ ". " ^ (print_type t1)
-
-let rec print_term (t : term) : string = 
-  match t with
-    Var x -> x
-  | N n -> string_of_int n
-  | Add (t1, t2) -> "(" ^ (print_term t1) ^ " + " ^ (print_term t2) ^ ")"
-  | Sub (t1, t2) -> "(" ^ (print_term t1) ^ " - " ^ (print_term t2) ^ ")"
-  | App (t1, t2) -> "(" ^ (print_term t1) ^ " " ^ (print_term t2) ^ ")"
-  | Abs (x, t) -> "(fun " ^ x ^ " -> " ^ (print_term t) ^ ")"
-  | Nil -> "[]"
-  | Cons (hd, tl) -> "(" ^ (print_term hd) ^ " :: " ^ (print_term tl) ^ ")"
-  | Hd t1 -> "hd(" ^ (print_term t1) ^ ")"
-  | Tl t1 -> "tl(" ^ (print_term t1) ^ ")"
-  | IfZero (t1, t2, t3) -> "ifzero "^ (print_term t1) ^ " then " ^ (print_term t2) ^ " else " ^ (print_term t3)
-  | IfEmpty (t1, t2, t3) -> "ifempty "^ (print_term t1) ^ " then " ^ (print_term t2) ^ " else " ^ (print_term t3)
-  | Let (x, t1, t2) -> "let " ^ x ^ " = " ^ (print_term t1) ^ " in " ^ (print_term t2)
-  | Fix (x, t1) -> "fix (" ^ x ^ " -> " ^ (print_term t1) ^ ")" 
-  
-let rec find_goal (e: equa_zip) (goal:string) : typ =
-  match e with
-    (_, []) -> raise VarPasTrouve
-  | (_, (Var v, t)::q) when v = goal -> t
-  | (_, (t, Var v)::q) when v = goal -> t
-  | (e1, c::e2) -> find_goal (e1, e2) goal
-
-  (*
-  How zip works ( List of already processed equations , List of equations to process )
-  *)
-let rec unification (e : equa_zip) (but : string) : typ = 
+and unification (e : equa_zip) (but : string) : typ = 
   match e with 
   | (_, []) ->  (* reached the end *)
       (try find_goal (rewind e) but 
@@ -373,16 +370,19 @@ let rec print_reductions t steps =
     end
  
 let () =
-  if Array.length Sys.argv < 3 then (
-    Printf.eprintf "Usage: %s <filename> <num_steps>\n" Sys.argv.(0);
+  if Array.length Sys.argv < 4 then (
+    Printf.eprintf "Usage: %s <filename> <mode> [num_steps]\n" Sys.argv.(0);
+    Printf.eprintf "  mode: 'type' for type inference, 'eval' for evaluation\n";
+    Printf.eprintf "  num_steps: required for 'eval' mode\n";
     exit 1
   );
 
   let fname = Sys.argv.(1) in
+  let mode = Sys.argv.(2) in
   let num_steps =
-    try int_of_string Sys.argv.(2)
+    try int_of_string Sys.argv.(3)
     with Failure _ ->
-      Printf.eprintf "Second argument must be an integer\n";
+      Printf.eprintf "Third argument must be an integer\n";
       exit 1
   in
 
@@ -390,8 +390,16 @@ let () =
   let lexbuf = Lexing.from_channel ic in
   try
     let prog_term = Parser.prog Lexer.token lexbuf in
-    print_reductions prog_term num_steps;
-    close_in ic
+    match mode with
+    | "type" | "ty" ->
+        let result = inference prog_term in
+        print_endline result;
+    | "eval" | "ev" ->
+      print_reductions prog_term num_steps;
+    | _ ->
+        Printf.eprintf "Unknown mode: %s. Use 'type' or 'eval'.\n" mode;
+    close_in ic;
+    exit 1
   with
   | Lexer.Eof | Parsing.Parse_error ->
       Printf.eprintf "Error parsing file %s\n" fname;
