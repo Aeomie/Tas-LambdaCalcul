@@ -29,3 +29,4 @@ type typ =
   | Arr of typ * typ
   | List of typ
   | Forall of string * typ
+  | WeakVar of string

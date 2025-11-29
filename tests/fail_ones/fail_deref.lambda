@@ -1,2 +1,1 @@
-let x = 5 in
-!x
+let l = ref([]) in let dummy = (l := cons((fun x -> x), [])) in (hd(!(l))) + 2

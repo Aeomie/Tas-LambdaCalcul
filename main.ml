@@ -267,6 +267,29 @@ let left_right_eval_onestep ((t, st) : term * state) : term * state  =
 
 exception VarPasTrouve
 
+let rec print_term (t : term) : string = 
+  match t with
+    Var x -> x
+  | N n -> string_of_int n
+  | Add (t1, t2) -> "(" ^ (print_term t1) ^ " + " ^ (print_term t2) ^ ")"
+  | Sub (t1, t2) -> "(" ^ (print_term t1) ^ " - " ^ (print_term t2) ^ ")"
+  | App (t1, t2) -> "(" ^ (print_term t1) ^ " " ^ (print_term t2) ^ ")"
+  | Abs (x, t) -> "(fun " ^ x ^ " -> " ^ (print_term t) ^ ")"
+  | Nil -> "[]"
+  | Unit -> "()"
+  | Cons (hd, tl) -> "(" ^ (print_term hd) ^ " :: " ^ (print_term tl) ^ ")"
+  | Hd t1 -> "hd(" ^ (print_term t1) ^ ")"
+  | Tl t1 -> "tl(" ^ (print_term t1) ^ ")"
+  | IfZero (t1, t2, t3) -> "ifzero "^ (print_term t1) ^ " then " ^ (print_term t2) ^ " else " ^ (print_term t3)
+  | IfEmpty (t1, t2, t3) -> "ifempty "^ (print_term t1) ^ " then " ^ (print_term t2) ^ " else " ^ (print_term t3)
+  | Let (x, t1, t2) -> "let " ^ x ^ " = " ^ (print_term t1) ^ " in " ^ (print_term t2)
+  | Fix (x, t1) -> "fix (" ^ x ^ " -> " ^ (print_term t1) ^ ")" 
+  | Deref t1 -> "!" ^ (print_term t1)
+  | Ref t1 -> "ref " ^ (print_term t1)
+  | Assign (t1, t2) -> (print_term t1) ^ " := " ^ (print_term t2)
+  | Region r -> "region " ^ r
+  
+
 let rec search_type (v:string) (e:env) : typ =
   match e with
     [] -> raise VarPasTrouve
@@ -287,6 +310,7 @@ let rec belongs_type (v:string) (t:typ) : bool =
   | Forall (x, t1) -> if x = v then false else belongs_type v t1
   | UnitType -> false
   | RefType t1 -> belongs_type v t1
+  | WeakVar v1 -> v1 = v
 
 
 let rec substitue_type(t:typ) (v:string) (new_typ:typ) : typ =
@@ -300,6 +324,7 @@ let rec substitue_type(t:typ) (v:string) (new_typ:typ) : typ =
       else Forall (x, substitue_type t1 v new_typ)
   | UnitType -> UnitType
   | RefType t1 -> RefType (substitue_type t1 v new_typ)
+  | WeakVar v1 -> if v1 = v then new_typ else WeakVar v1
 
 
   (* gets the free vars from that type*)
@@ -312,6 +337,7 @@ let rec get_free_vars_type (t:typ) : string list =
   | Forall (x, t1) -> List.filter (fun y -> y <> x) (get_free_vars_type t1)
   | UnitType -> []
   | RefType t1 -> get_free_vars_type t1
+  | WeakVar x -> [x]
 
 
   (* gets all the vars from the types in the env *)
@@ -327,6 +353,17 @@ let generalise (t:typ) (e:env) : typ =
   (*removes dupes if there are any *)
   let unique_vars = List.sort_uniq String.compare vars_to_generalise in
   List.fold_right (fun v acc -> Forall (v, acc)) unique_vars t
+
+let rec weakify (t : typ) : typ =
+  match t with
+  | Var x -> WeakVar x
+  | Arr(t1, t2) -> Arr(weakify t1, weakify t2)
+  | List t1 -> List(weakify t1)
+  | RefType t1 -> RefType(weakify t1)
+  | Forall(x, t1) -> Forall(x, t1)   (* shouldn't happen *)
+  | Nat -> Nat
+  | UnitType -> UnitType
+  | WeakVar x -> WeakVar x
 
 let substitue_type_everywhere (e:equations) (v:string) (new_type: typ) : equations = 
   List.map (fun (x, y) -> (substitue_type x v new_type , substitue_type y v new_type)) e
@@ -354,28 +391,7 @@ let rec print_type (t : typ) : string =
   | RefType t1 -> "Ref[" ^ (print_type t1) ^ "]"
   | List t1 -> "List[" ^ (print_type t1) ^ "]"
   | Forall (v, t1) -> "∀" ^ v ^ ". " ^ (print_type t1)
-
-let rec print_term (t : term) : string = 
-  match t with
-    Var x -> x
-  | N n -> string_of_int n
-  | Add (t1, t2) -> "(" ^ (print_term t1) ^ " + " ^ (print_term t2) ^ ")"
-  | Sub (t1, t2) -> "(" ^ (print_term t1) ^ " - " ^ (print_term t2) ^ ")"
-  | App (t1, t2) -> "(" ^ (print_term t1) ^ " " ^ (print_term t2) ^ ")"
-  | Abs (x, t) -> "(fun " ^ x ^ " -> " ^ (print_term t) ^ ")"
-  | Nil -> "[]"
-  | Unit -> "()"
-  | Cons (hd, tl) -> "(" ^ (print_term hd) ^ " :: " ^ (print_term tl) ^ ")"
-  | Hd t1 -> "hd(" ^ (print_term t1) ^ ")"
-  | Tl t1 -> "tl(" ^ (print_term t1) ^ ")"
-  | IfZero (t1, t2, t3) -> "ifzero "^ (print_term t1) ^ " then " ^ (print_term t2) ^ " else " ^ (print_term t3)
-  | IfEmpty (t1, t2, t3) -> "ifempty "^ (print_term t1) ^ " then " ^ (print_term t2) ^ " else " ^ (print_term t3)
-  | Let (x, t1, t2) -> "let " ^ x ^ " = " ^ (print_term t1) ^ " in " ^ (print_term t2)
-  | Fix (x, t1) -> "fix (" ^ x ^ " -> " ^ (print_term t1) ^ ")" 
-  | Deref t1 -> "!" ^ (print_term t1)
-  | Ref t1 -> "ref " ^ (print_term t1)
-  | Assign (t1, t2) -> (print_term t1) ^ " := " ^ (print_term t2)
-  | Region r -> "region " ^ r
+  | WeakVar v -> "WeakVar " ^ v
   
 let rec find_goal (e: equa_zip) (goal:string) : typ =
   match e with
@@ -387,6 +403,48 @@ let rec find_goal (e: equa_zip) (goal:string) : typ =
   (*
   How zip works ( List of already processed equations , List of equations to process )
   *)
+
+  let rec is_non_expansive (t: term) : bool =
+  match t with
+  | Var _ -> true           
+  | N _ -> true          
+  | Unit -> true            
+  | Nil -> true            
+  | Abs(_, _) -> true      
+  
+  (* Constructeurs purs *)
+  | Cons(hd, tl) -> is_non_expansive hd && is_non_expansive tl
+  
+  (* Applications, Ref, Deref, Assign: PAS OK! *)
+  | App(_, _) -> false       
+  | Ref _ -> false           
+  | Deref _ -> false           
+  | Assign(_, _) -> false      
+  
+  (* Opérations *)
+  | Add(t1, t2) -> is_non_expansive t1 && is_non_expansive t2
+  | Sub(t1, t2) -> is_non_expansive t1 && is_non_expansive t2
+  | Hd _ -> false          
+  | Tl _ -> false            
+  
+  (* Branchements: dépend des sous-termes *)
+  | IfZero(_, t1, t2) -> is_non_expansive t1 && is_non_expansive t2
+  | IfEmpty(_, t1, t2) -> is_non_expansive t1 && is_non_expansive t2
+  
+  (* Let et Fix *)
+  | Let(_, t1, t2) -> is_non_expansive t1 && is_non_expansive t2
+  | Fix(_, _) -> false         
+  
+  | Region _ -> false    
+  
+let rec contains_forall t =
+  match t with
+  | Forall(_, _) -> true
+  | Arr(t1, t2) -> contains_forall t1 || contains_forall t2
+  | List t1 -> contains_forall t1
+  | RefType t1 -> contains_forall t1
+  | _ -> false
+
 
 let rec generate_equations (te:term) (t:typ) (e:env) : equations = 
   match te with
@@ -447,23 +505,41 @@ let rec generate_equations (te:term) (t:typ) (e:env) : equations =
       let eq1 = generate_equations m (Var nv) ((phi, Var nv)::e) in
       (t, Var nv) :: eq1
 
-  | Let(x, term1, term2) ->
-    (* On doit typer term1 pour obtenir son type généralisé *)
+| Let(x, term1, term2) ->
     let nv1 = new_var () in
-    let eq1 = ([], generate_equations term1 (Var nv1) e) in (* zip def *)
-      (try
-      let t1 = unification eq1 nv1 in
-      let generalized_t1 = generalise t1 e in
+    let eq1_list = generate_equations term1 (Var nv1) e in
+    
+    (* Unifier pour obtenir le type *)
+    let eq1_zip = ([], eq1_list) in
+    (try
+      let t1 = unification eq1_zip nv1 in
+      
+      (* Généraliser ou pas *)
+      let generalized_t1 = 
+        if is_non_expansive term1 then
+          generalise t1 e
+        else
+          t1  (* PAS de généralisation *)
+      in
+      
+      (* Générer les équations pour term2 *)
       let eq2 = generate_equations term2 t ((x, generalized_t1)::e) in
-      eq2
-      with Unif_fail msg -> 
-        raise (Unif_fail ("Erreur de typage dans let: " ^ msg)))
+      
+      (* IMPORTANT: Retourner AUSSI les équations de term1 qui ne sont pas généralisées! *)
+      if is_non_expansive term1 then
+        eq2  (* Si généralisé, on peut oublier eq1 *)
+      else
+        eq1_list @ eq2  (* Sinon, garder les contraintes! *)
+        
+    with Unif_fail msg -> 
+      raise (Unif_fail ("Erreur de typage dans let: " ^ msg)))
   | Ref t1 ->
-      let nv: string = new_var () in
+      let nv = new_var () in
       let eq1 = generate_equations t1 (Var nv) e in
-      (t, RefType (Var nv)) :: eq1
+      (t, RefType (Var nv)) :: eq1   (* ← Var, pas WeakVar *)
+
   | Deref t1 ->
-      let nv: string = new_var () in
+      let nv = new_var () in
       let eq1 = generate_equations t1 (RefType (Var nv)) e in
       (t, Var nv) :: eq1
   | Assign (t1, t2) ->
@@ -490,6 +566,8 @@ and unification (e : equa_zip) (but : string) : typ =
       | Var v1 , _ when v1 = but -> unification ((t_left, t_right)::e1, e2) but
       | Var v1, Var v2 ->
          unification (substitue_type_zip (rewind (e1,e2)) v2 (Var v1)) but
+      | WeakVar w1, WeakVar w2 ->
+        unification (substitue_type_zip (rewind (e1,e2)) w2 (WeakVar w1)) but
       (* For all*)
       | Forall(x, t1), t2 ->
           let fresh = new_var () in
@@ -513,6 +591,19 @@ and unification (e : equa_zip) (but : string) : typ =
           if belongs_type v2 t1 
           then raise (Unif_fail ("occurence de "^ v2 ^" dans " ^(print_type t1))) 
           else unification (substitue_type_zip (rewind (e1,e2)) v2 t1) but
+      (* Weak variable cases *)
+      | WeakVar w1, t2 ->
+          if belongs_type w1 t2 then
+            raise (Unif_fail ("occurence de "^ w1 ^" dans "^(print_type t2)))
+          else
+            unification (substitue_type_zip (rewind (e1,e2)) w1 t2) but
+
+      | t1, WeakVar w2 ->
+          if belongs_type w2 t1 then
+            raise (Unif_fail ("occurence de "^ w2 ^" dans "^(print_type t1)))
+          else
+            unification (substitue_type_zip (rewind (e1,e2)) w2 t1) but
+
       (* if they are arrow type *)
       | Arr (t1,t2), Arr (t3,t4) -> unification (e1, (t1, t3)::(t2, t4)::e2) but
       (* fail calls*)
