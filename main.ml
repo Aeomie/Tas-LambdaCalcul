@@ -5,12 +5,22 @@ type env = (string * typ) list
 (*Listes d'équations*)
 type equations = (typ * typ) list
 
+(* memory cases*)
+type region = string
+type state = (region * term) list
+
 (* generator of names of variables of types *)
 let counter_var : int ref = ref 0
+(* Compteur pour générer des régions fraîches *)
+let region_counter = ref 0
 
 let new_var () : string = 
   counter_var := !counter_var +1;
   "T" ^(string_of_int !counter_var)
+
+let new_region_id () =
+  region_counter := !region_counter + 1;
+  "region" ^ (string_of_int !region_counter)
 
 (* MUTUAL RECURSION: rename_var and free_vars *)
 let rec rename_var (t:term) (old_v:string) (new_v:string) : term =
@@ -18,24 +28,57 @@ let rec rename_var (t:term) (old_v:string) (new_v:string) : term =
     Var x -> if x = old_v then Var new_v else Var x
   | N n -> N n
   | Add (t1, t2) -> Add (rename_var t1 old_v new_v, rename_var t2 old_v new_v)
+  | Sub (t1, t2) -> Sub (rename_var t1 old_v new_v, rename_var t2 old_v new_v)
   | App (t1, t2) -> App (rename_var t1 old_v new_v, rename_var t2 old_v new_v)
   | Abs (x, t_body) -> 
       if x = old_v then Abs (x, t_body) 
       else Abs (x, rename_var t_body old_v new_v)
+  | Hd t1 -> Hd (rename_var t1 old_v new_v)
+  | Tl t1 -> Tl (rename_var t1 old_v new_v)
+  | Cons (hd, tl) -> Cons (rename_var hd old_v new_v, rename_var tl old_v new_v)
+  | IfZero (cond, then_e, else_e) ->
+      IfZero (rename_var cond old_v new_v,
+       rename_var then_e old_v new_v,
+        rename_var else_e old_v new_v)
+  | IfEmpty (cond, then_e, else_e) ->
+      IfEmpty (rename_var cond old_v new_v,
+       rename_var then_e old_v new_v,
+        rename_var else_e old_v new_v)
+  | Let (x, t1, t2) ->
+      if x = old_v then Let (x, rename_var t1 old_v new_v, t2)
+      else Let (x, rename_var t1 old_v new_v, rename_var t2 old_v new_v)
+  | Fix (x, t1) ->
+      if x = old_v then Fix (x, t1)
+      else Fix (x, rename_var t1 old_v new_v)
+  | Deref t1 -> Deref(rename_var t1 old_v new_v)
+  | Ref t1 -> Ref(rename_var t1 old_v new_v)
+  | Assign (t1, t2) -> Assign (rename_var t1 old_v new_v, rename_var t2 old_v new_v)
+  | Region _ | Unit | Nil -> t  (* For other terms like Unit, Nil, etc. *)
+
 
 and free_vars (t:term) : string list =
   match t with
     Var x -> [x]
   | N n -> []
   | Add (t1, t2) -> (free_vars t1) @ (free_vars t2)
+  | Sub (t1, t2) -> (free_vars t1) @ (free_vars t2)
   | App (t1, t2) -> (free_vars t1) @ (free_vars t2)
   | Abs (x, t_body) -> List.filter (fun y -> y <> x) (free_vars t_body)
+  | Hd t1 | Tl t1 | Deref t1 | Ref t1 | Fix (_, t1) -> free_vars t1
+  | Cons (hd, tl) -> (free_vars hd) @ (free_vars tl)
+  | IfZero (cond, then_e, else_e) | IfEmpty (cond, then_e, else_e) ->
+      (free_vars cond) @ (free_vars then_e) @ (free_vars else_e)
+  | Let (x, t1, t2) ->
+      (free_vars t1) @ (List.filter (fun y -> y <> x) (free_vars t2))
+  | Nil | Unit | Region _ -> []
+
 
 and substitute_var (t:term) (v:string) (t0:term) : term =
   match t with
     Var x -> if x = v then t0 else Var x
   | N n -> N n
   | Add (t1, t2) -> Add (substitute_var t1 v t0, substitute_var t2 v t0)
+  | Sub (t1, t2) -> Sub (substitute_var t1 v t0, substitute_var t2 v t0)
   | App (t1, t2) -> App (substitute_var t1 v t0, substitute_var t2 v t0)
   | Abs (x, t_body) -> 
       if x = v then Abs(x, t_body)
@@ -45,6 +88,28 @@ and substitute_var (t:term) (v:string) (t0:term) : term =
         Abs (new_x, substitute_var new_body v t0)
       else 
         Abs (x, substitute_var t_body v t0)
+  | Cons(hd, tl) -> Cons(substitute_var hd v t0, substitute_var tl v t0)
+  | Hd t1 -> Hd (substitute_var t1 v t0)
+  | Tl t1 -> Tl (substitute_var t1 v t0)
+  | IfZero (cond, then_e, else_e) ->
+      IfZero (substitute_var cond v t0,
+       substitute_var then_e v t0,
+        substitute_var else_e v t0)
+  | IfEmpty (cond, then_e, else_e) ->
+      IfEmpty (substitute_var cond v t0,
+       substitute_var then_e v t0,
+        substitute_var else_e v t0)
+  | Let (x, t1, t2) ->
+      if x = v then Let (x, substitute_var t1 v t0, t2)
+      else Let (x, substitute_var t1 v t0, substitute_var t2 v t0)
+  | Fix (x, t1) ->
+      if x = v then Fix (x, t1)
+      else Fix (x, substitute_var t1 v t0)
+  | Deref e -> Deref (substitute_var e v t0)
+  | Ref e -> Ref (substitute_var e v t0)
+  | Assign (e1, e2) -> Assign (substitute_var e1 v t0, substitute_var e2 v t0)
+  | Region r -> Region r
+  | _ -> t  (* For other terms like Unit, Nil, etc. *)
 
 let barendregt_checker(t:term) : term =
   let rec aux(t:term) (vars:string list) : term =
@@ -62,6 +127,18 @@ let barendregt_checker(t:term) : term =
         Abs (x, aux t_body (x::vars))
   in aux t []
 
+(* not sure about this , to recheck*)
+let rec is_value (t:term) : bool =
+  match t with
+  | N _ -> true
+  | Abs (_, _) -> true
+  | Nil -> true
+  | Unit -> true
+  | Region _ -> true
+  | Cons(v1, v2) -> is_value v1 && is_value v2
+  | _ -> false
+
+
 let rec can_reduce(t:term) : bool =
   match t with
   | Add(N _, N _) -> true
@@ -78,55 +155,115 @@ let rec can_reduce(t:term) : bool =
   | IfEmpty(Nil, _, _) -> true
   | IfEmpty(Cons(_, _), _, _) -> true
   | IfEmpty(cond, _, _) -> can_reduce cond (* incase in the condition is a var *)
-  | Abs(_,_) | Var _ | N _ | Nil -> false
+  | Ref e -> true
+  | Deref e -> true
+  | Assign(e1, e2) -> true (* because its reduceable until it disappears & e1 get e2*)
+  | Abs(_,_) | Var _ | N _ | Nil | Unit | Region _ -> false
 
-let rec reduce_one_step(t:term) : term =
+let rec reduce_one_step ((t, st) : term * state) : term * state =
   match t with
-  (* Direct redexes - reduce them *)
-  | Add(N n1, N n2) -> N (n1 + n2)
-  | Sub(N n1, N n2) -> N (n1 - n2)
-  | App(Abs(x, t_body), (N _ | Abs _ as v)) -> substitute_var t_body x v
+  (* Direct redexes - state inchangé *)
+  | Add(N n1, N n2) -> (N (n1 + n2), st)
+  | Sub(N n1, N n2) -> (N (n1 - n2), st)
+  | App(Abs(x, t_body), v) when not (can_reduce v) -> 
+      (substitute_var t_body x v, st)
   
-  (* Compound terms - find leftmost redex *)
+  (* Compound terms - propage le state *)
   | Add(t1, t2) -> 
       if can_reduce t1 then 
-        Add(reduce_one_step t1, t2)  (* Still recursively finds leftmost in t1 *)
+        let (t1', st') = reduce_one_step (t1, st) in
+        (Add(t1', t2), st')
       else 
-        Add(t1, reduce_one_step t2)
+        let (t2', st') = reduce_one_step (t2, st) in
+        (Add(t1, t2'), st')
+  
   | Sub(t1, t2) -> 
-    if can_reduce t1 then 
-      Sub(reduce_one_step t1, t2)
-    else 
-      Sub(t1, reduce_one_step t2)
+      if can_reduce t1 then 
+        let (t1', st') = reduce_one_step (t1, st) in
+        (Sub(t1', t2), st')
+      else 
+        let (t2', st') = reduce_one_step (t2, st) in
+        (Sub(t1, t2'), st')
+  
   | App(t1, t2) -> 
       if can_reduce t1 then 
-        App(reduce_one_step t1, t2)
+        let (t1', st') = reduce_one_step (t1, st) in
+        (App(t1', t2), st')
       else 
-        App(t1, reduce_one_step t2)
+        let (t2', st') = reduce_one_step (t2, st) in
+        (App(t1, t2'), st')
+  
   | Let(x, t1, t2) ->
       if can_reduce t1 then
-        Let(x, reduce_one_step t1, t2)
+        let (t1', st') = reduce_one_step (t1, st) in
+        (Let(x, t1', t2), st')
       else
-        substitute_var t2 x t1
+      (substitute_var t2 x t1, st)
+  
   | Fix(x, t1) ->
-      substitute_var t1 x (Fix(x, t1))
+      (substitute_var t1 x (Fix(x, t1)), st)
+  
   | IfZero(N 0, then_e, else_e) ->
-      then_e
-  | IfZero(N n, then_e, else_e) -> 
-      else_e
-  | IfZero(cond,then_e,else_e)->
-      IfZero(reduce_one_step cond, then_e, else_e)
+      (then_e, st)
+  | IfZero(N _, then_e, else_e) -> 
+      (else_e, st)
+  | IfZero(cond, then_e, else_e) ->
+      let (cond', st') = reduce_one_step (cond, st) in
+      (IfZero(cond', then_e, else_e), st')
+  
   | IfEmpty(Nil, then_e, else_e) ->
-      then_e
-  | IfEmpty(Cons(hd, tl), then_e, else_e) ->
-      else_e
+      (then_e, st)
+  | IfEmpty(Cons(_, _), then_e, else_e) ->
+      (else_e, st)
   | IfEmpty(cond, then_e, else_e) ->
-      IfEmpty(reduce_one_step cond, then_e, else_e)
-  (* Already in normal form *)
-  | _ -> t
+      let (cond', st') = reduce_one_step (cond, st) in
+      (IfEmpty(cond', then_e, else_e), st')
+  | Deref e -> 
+      if can_reduce e then
+        let (e', st') = reduce_one_step (e, st) in
+        (Deref e', st')
+      else
+        (match e with
+        | Region region_id ->
+            (try
+              let value = List.assoc region_id st in
+              (value, st)
+            with Not_found ->
+              failwith ("Invalid region: " ^ region_id)
+            )
+        | _ -> failwith "Deref applied to non-region"
+        )
+  | Ref e -> 
+      if can_reduce e then
+        let (e', st') = reduce_one_step (e, st) in
+        (Ref e', st')
+      else
+        if(is_value e) then
+          let region_id = new_region_id () in
+          let new_state = (region_id, e) :: st in
+            Printf.printf "Created new region: %s with value\n" 
+    region_id ;
+          (Region region_id, new_state)
+        else
+          failwith "Ref applied to non-value"
+  | Assign(e1, e2) ->
+      if can_reduce e1 then
+        let (e1', st') = reduce_one_step (e1, st) in
+        (Assign(e1', e2), st')
+      else if can_reduce e2 then
+        let (e2', st') = reduce_one_step (e2, st) in
+        (Assign(e1, e2'), st')
+      else
+        (match e1 with
+        | Region region_id ->
+            let new_state = (region_id, e2) :: (List.remove_assoc region_id st) in
+            (Unit, new_state) (* Assignment returns Unit *)
+        | _ -> failwith "Assign applied to non-region"
+          )
+  | _ -> (t, st)  (* No reduction possible *)
 
-let left_right_eval_onestep (t:term) : term =
-  if can_reduce t then reduce_one_step t else t
+let left_right_eval_onestep ((t, st) : term * state) : term * state  =
+  if can_reduce t then reduce_one_step (t, st) else (t, st)
 
 exception VarPasTrouve
 
@@ -207,6 +344,8 @@ let rec print_type (t : typ) : string =
     Var x -> x
   | Arr (t1, t2) -> "(" ^ (print_type t1) ^ " -> " ^ (print_type t2) ^ ")"
   | Nat -> "Nat"
+  | UnitType -> "Unit"
+  | RefType t1 -> "Ref[" ^ (print_type t1) ^ "]"
   | List t1 -> "List[" ^ (print_type t1) ^ "]"
   | Forall (v, t1) -> "∀" ^ v ^ ". " ^ (print_type t1)
 
@@ -219,6 +358,7 @@ let rec print_term (t : term) : string =
   | App (t1, t2) -> "(" ^ (print_term t1) ^ " " ^ (print_term t2) ^ ")"
   | Abs (x, t) -> "(fun " ^ x ^ " -> " ^ (print_term t) ^ ")"
   | Nil -> "[]"
+  | Unit -> "()"
   | Cons (hd, tl) -> "(" ^ (print_term hd) ^ " :: " ^ (print_term tl) ^ ")"
   | Hd t1 -> "hd(" ^ (print_term t1) ^ ")"
   | Tl t1 -> "tl(" ^ (print_term t1) ^ ")"
@@ -226,6 +366,10 @@ let rec print_term (t : term) : string =
   | IfEmpty (t1, t2, t3) -> "ifempty "^ (print_term t1) ^ " then " ^ (print_term t2) ^ " else " ^ (print_term t3)
   | Let (x, t1, t2) -> "let " ^ x ^ " = " ^ (print_term t1) ^ " in " ^ (print_term t2)
   | Fix (x, t1) -> "fix (" ^ x ^ " -> " ^ (print_term t1) ^ ")" 
+  | Deref t1 -> "!" ^ (print_term t1)
+  | Ref t1 -> "ref " ^ (print_term t1)
+  | Assign (t1, t2) -> (print_term t1) ^ " := " ^ (print_term t2)
+  | Region r -> "region " ^ r
   
 let rec find_goal (e: equa_zip) (goal:string) : typ =
   match e with
@@ -357,16 +501,16 @@ let inference (t: term) : string =
       (print_term t)^" ***TYPABLE*** avec le type "^(print_type res)
   with Unif_fail msg -> (print_term t)^" ***NOT TYPABLE*** : "^msg
 
-let rec print_reductions t steps = 
+let rec print_reductions (t, st) steps = 
   if steps = 0 then 
     print_endline (print_term t)
   else
-    let t' = left_right_eval_onestep t in
+    let (t', st') = left_right_eval_onestep (t, st) in
     if t' = t then 
       print_endline (print_term t)
     else begin
       print_endline (print_term t);
-      print_reductions t' (steps - 1)
+      print_reductions (t', st') (steps - 1)
     end
  
 let () =
@@ -395,7 +539,7 @@ let () =
         let result = inference prog_term in
         print_endline result;
     | "eval" | "ev" ->
-      print_reductions prog_term num_steps;
+      print_reductions (prog_term, []) num_steps;
     | _ ->
         Printf.eprintf "Unknown mode: %s. Use 'type' or 'eval'.\n" mode;
     close_in ic;

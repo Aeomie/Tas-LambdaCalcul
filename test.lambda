@@ -1,1 +1,3 @@
-ifzero (3 - 3) then 99 else 88
+let a = 5 in
+let b = 5 in 
+a-b

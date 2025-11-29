@@ -8,8 +8,10 @@ open Ast
 %token LPAREN RPAREN LBRACKET RBRACKET
 %token ARROW FUN LET IN EQUAL FIX
 %token HD TL CONS IFZERO IFEMPTY THEN ELSE
+%token DEREF REF ASSIGN UNIT
 %token EOF
 
+%left ASSIGN
 %left PLUS MINUS
 %nonassoc APP
 
@@ -32,12 +34,16 @@ expr:
   | IFEMPTY expr THEN expr ELSE expr     { IfEmpty($2, $4, $6) }
   | expr PLUS expr                       { Add($1, $3) }
   | expr MINUS expr                      { Sub($1, $3) }
+  | expr ASSIGN expr                    { Assign($1, $3) }
+  | REF expr                             { Ref($2) }
+  | DEREF expr                           { Deref($2) }
 ;
 
 
 basic_expr:
   | INT                                  { N($1) }
   | IDENT                                { Var($1) }
+  | UNIT                                 { Unit }
   | LBRACKET RBRACKET                    { Nil }
   | LBRACKET expr_list RBRACKET          { $2 }
   | HD LPAREN expr RPAREN              { Hd($3) }
