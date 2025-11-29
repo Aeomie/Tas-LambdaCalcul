@@ -1,3 +1,3 @@
-let a = 5 in
-let b = 5 in 
-a-b
+let a = ref 10 in
+let b = ref 5 in 
+!a - !b
