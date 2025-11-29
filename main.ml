@@ -285,6 +285,8 @@ let rec belongs_type (v:string) (t:typ) : bool =
   | Nat -> false
   | List t1 -> belongs_type v t1
   | Forall (x, t1) -> if x = v then false else belongs_type v t1
+  | UnitType -> false
+  | RefType t1 -> belongs_type v t1
 
 
 let rec substitue_type(t:typ) (v:string) (new_typ:typ) : typ =
@@ -296,6 +298,8 @@ let rec substitue_type(t:typ) (v:string) (new_typ:typ) : typ =
   | Forall (x, t1) ->
       if x = v then Forall (x, t1) (* Linked , Dont subtitute*)
       else Forall (x, substitue_type t1 v new_typ)
+  | UnitType -> UnitType
+  | RefType t1 -> RefType (substitue_type t1 v new_typ)
 
 
   (* gets the free vars from that type*)
@@ -306,6 +310,8 @@ let rec get_free_vars_type (t:typ) : string list =
   | Arr (t1, t2) -> (get_free_vars_type t1) @ (get_free_vars_type t2)
   | List t1 -> get_free_vars_type t1
   | Forall (x, t1) -> List.filter (fun y -> y <> x) (get_free_vars_type t1)
+  | UnitType -> []
+  | RefType t1 -> get_free_vars_type t1
 
 
   (* gets all the vars from the types in the env *)
@@ -386,6 +392,7 @@ let rec generate_equations (te:term) (t:typ) (e:env) : equations =
   match te with
     Var x -> let tv : typ = search_type x e in [(t,tv)]
   | N _ -> [(t, Nat)]
+  | Unit -> [(t, UnitType)]
   | Add (t1, t2) ->
     let eq1 : equations = generate_equations t1 Nat e in
     let eq2 : equations = generate_equations t2 Nat e in
@@ -451,6 +458,24 @@ let rec generate_equations (te:term) (t:typ) (e:env) : equations =
       eq2
       with Unif_fail msg -> 
         raise (Unif_fail ("Erreur de typage dans let: " ^ msg)))
+  | Ref t1 ->
+      let nv: string = new_var () in
+      let eq1 = generate_equations t1 (Var nv) e in
+      (t, RefType (Var nv)) :: eq1
+  | Deref t1 ->
+      let nv: string = new_var () in
+      let eq1 = generate_equations t1 (RefType (Var nv)) e in
+      (t, Var nv) :: eq1
+  | Assign (t1, t2) ->
+      let nv: string = new_var () in
+      let eq1 = generate_equations t1 (RefType (Var nv)) e in
+      let eq2 = generate_equations t2 (Var nv) e in
+      (t, UnitType) :: (eq1 @ eq2)
+  | Region r ->
+      let nv: string = new_var () in
+      [(t, RefType (Var nv))]  (* A region can be seen as a reference to some type *)
+
+    
 and unification (e : equa_zip) (but : string) : typ = 
   match e with 
   | (_, []) ->  (* reached the end *)
@@ -460,6 +485,8 @@ and unification (e : equa_zip) (but : string) : typ =
       match (t_left, t_right) with
       (* same type *)
       | Nat , Nat -> unification (e1, e2) but
+      | UnitType , UnitType -> unification (e1, e2) but
+      (* Var cases *)
       | Var v1 , _ when v1 = but -> unification ((t_left, t_right)::e1, e2) but
       | Var v1, Var v2 ->
          unification (substitue_type_zip (rewind (e1,e2)) v2 (Var v1)) but
@@ -475,6 +502,7 @@ and unification (e : equa_zip) (but : string) : typ =
           unification (e1, (t1, t2_opened)::e2) but
       (* List*)
       | List t1 , List t2 -> unification (e1, (t1, t2)::e2) but
+      | RefType t1, RefType t2 -> unification (e1, (t1, t2)::e2) but
       
       (* if one of the two types are Var *)
       | Var v1 , t2 ->
@@ -488,6 +516,10 @@ and unification (e : equa_zip) (but : string) : typ =
       (* if they are arrow type *)
       | Arr (t1,t2), Arr (t3,t4) -> unification (e1, (t1, t3)::(t2, t4)::e2) but
       (* fail calls*)
+      | RefType _ , _ -> raise (Unif_fail ("type référence non-unifiable avec "^(print_type t_right)))
+      | _ , RefType _ -> raise (Unif_fail ("type référence non-unifiable avec "^(print_type t_left)))
+      | UnitType , _ -> raise (Unif_fail ("type unité non-unifiable avec "^(print_type t_right)))
+      | _ , UnitType -> raise (Unif_fail ("type unité non-unifiable avec "^(print_type t_left)))
       | Arr (_, _), _ -> raise (Unif_fail ("type fleche non-unifiable avec "^(print_type t_right)))
       | _, Arr (_, _) -> raise (Unif_fail ("type fleche non-unifiable avec "^(print_type t_left)))
       | List _ , _ -> raise (Unif_fail ("type liste non-unifiable avec "^(print_type t_right)))
