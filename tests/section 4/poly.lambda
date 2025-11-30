@@ -1,0 +1,1 @@
+let id = fun x -> x in let _ = id 5 in id (fun y -> y)
