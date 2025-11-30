@@ -1,1 +1,3 @@
-let l = ref([]) in let dummy = (l := cons((fun x -> x), [])) in (hd(!(l))) + 2
+let l = ref [] in
+let _ = l := [1] in
+(hd (!l)) + 2

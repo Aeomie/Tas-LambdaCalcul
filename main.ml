@@ -145,19 +145,31 @@ let rec can_reduce(t:term) : bool =
   | Add(t1, t2) -> can_reduce t1 || can_reduce t2
   | Sub(N _, N _) -> true
   | Sub(t1, t2) -> can_reduce t1 || can_reduce t2
-  | App(Abs(_, _), (N _ | Abs _)) -> true
+  | App(Abs(_, _), v) when not (can_reduce v) -> true
   | App(t1, t2) -> can_reduce t1 || can_reduce t2
-  | Let(_, _, _) -> true (* Always true Because Aslong as it still didnt disappear then its still reduceable*)
+  | Let(_, _, _) -> true
   | Fix(_, _) -> true
-  | IfZero(N 0, _, _) -> true     (* can pick then branch *)
-  | IfZero(N _, _, _) -> true     (* can pick else branch *)
-  | IfZero(cond, _, _) -> can_reduce cond  (* incase in the condition is a var *)
+  | IfZero(N 0, _, _) -> true
+  | IfZero(N _, _, _) -> true
+  | IfZero(cond, _, _) -> can_reduce cond
   | IfEmpty(Nil, _, _) -> true
   | IfEmpty(Cons(_, _), _, _) -> true
-  | IfEmpty(cond, _, _) -> can_reduce cond (* incase in the condition is a var *)
-  | Ref e -> true
-  | Deref e -> true
-  | Assign(e1, e2) -> true (* because its reduceable until it disappears & e1 get e2*)
+  | IfEmpty(cond, _, _) -> can_reduce cond
+  
+  (* LIST OPERATIONS - ADD THESE *)
+  | Hd (Cons(_, _)) -> true
+  | Hd t1 -> can_reduce t1
+  | Tl (Cons(_, _)) -> true
+  | Tl t1 -> can_reduce t1
+  | Cons(t1, t2) -> can_reduce t1 || can_reduce t2
+  
+  | Ref e -> can_reduce e || is_value e 
+  | Deref (Region _) -> true  (* can dereference a region *)
+  | Deref e -> can_reduce e
+  | Assign(Region _, v) when not (can_reduce v) -> true  (* ready to assign *)
+  | Assign(e1, e2) -> can_reduce e1 || can_reduce e2
+  
+  (* VALUES - CANNOT REDUCE *)
   | Abs(_,_) | Var _ | N _ | Nil | Unit | Region _ -> false
 
 let rec reduce_one_step ((t, st) : term * state) : term * state =
@@ -218,6 +230,38 @@ let rec reduce_one_step ((t, st) : term * state) : term * state =
   | IfEmpty(cond, then_e, else_e) ->
       let (cond', st') = reduce_one_step (cond, st) in
       (IfEmpty(cond', then_e, else_e), st')
+    (* LIST OPERATIONS *)
+  | Hd t1 ->
+      if can_reduce t1 then begin
+        let (t1', st') = reduce_one_step (t1, st) in
+        (Hd t1', st')
+      end else begin
+        (match t1 with
+        | Cons(h, _) -> (h, st)
+        | Nil -> failwith "hd of empty list"
+        | _ -> (Hd t1, st))  (* stuck *)
+      end
+  
+  | Tl t1 ->
+      if can_reduce t1 then begin
+        let (t1', st') = reduce_one_step (t1, st) in
+        (Tl t1', st')
+      end else begin
+        (match t1 with
+        | Cons(_, tl) -> (tl, st)
+        | Nil -> failwith "tl of empty list"
+        | _ -> (Tl t1, st))  (* stuck *)
+      end
+  
+  | Cons(t1, t2) ->
+      if can_reduce t1 then
+        let (t1', st') = reduce_one_step (t1, st) in
+        (Cons(t1', t2), st')
+      else if can_reduce t2 then
+        let (t2', st') = reduce_one_step (t2, st) in
+        (Cons(t1, t2'), st')
+      else
+        (Cons(t1, t2), st)  (* both are values *)
   | Deref e -> 
       if can_reduce e then
         let (e', st') = reduce_one_step (e, st) in
